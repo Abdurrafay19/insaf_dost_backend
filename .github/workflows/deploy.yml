@@ -1,25 +1,28 @@
-name: Sync to Hugging Face Spaces
+name: Sync Standalone Backend to Hugging Face Hub
 
 on:
   push:
     branches: [main]
-  workflow_dispatch: # Allows you to manually trigger the deployment if needed
+  workflow_dispatch:
 
 jobs:
-  deploy:
+  sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Code Base
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          lfs: true # Crucial if you ever track large model binaries via Git LFS
+          lfs: true
 
-      - name: Push to Hugging Face Space
-        uses: huggingface/hub-sync@v0.1.0
-        with:
-          github_repo_id: ${{ github.repository }}
-          huggingface_repo_id: abdurrafay-codes/insaf_dost_backend # e.g., abdurrafay19/insafdost-backend
-          hf_token: ${{ secrets.HF_TOKEN }}
-          repo_type: space
-          space_sdk: docker
+      - name: Set Up Git Credentials
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Force Push to Hugging Face Space Git Remote
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Replace 'abdurrafay-codes' and 'your-space-name' with your actual HF values
+          git push --force https://abdurrafay-codes:$HF_TOKEN@huggingface.co/spaces/abdurrafay-codes/insaf_dost_backend main
