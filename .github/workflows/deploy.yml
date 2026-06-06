@@ -24,5 +24,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # Replace 'abdurrafay-codes' and 'your-space-name' with your actual HF values
-          git push --force https://abdurrafay-codes:$HF_TOKEN@huggingface.co/spaces/abdurrafay-codes/insaf_dost_backend main
+          git push --force https://abdurrafay-codes:$HF_TOKEN@huggingface.co/spaces/abdurrafay-codes/insaf_dost_backend HEAD:main

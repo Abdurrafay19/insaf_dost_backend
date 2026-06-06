@@ -2,7 +2,7 @@
 title: InsafDost AI Backend
 emoji: ⚖️
 colorFrom: blue
-colorTo: gold
+colorTo: red
 sdk: docker
 app_port: 7860
 pinned: false
