@@ -1,0 +1,16 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Environment Variables (CRITICAL for security)
+.env
+
+# MacOS/Windows junk
+.DS_Store
+Thumbs.db
