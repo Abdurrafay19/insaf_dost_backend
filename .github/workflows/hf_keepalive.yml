@@ -1,0 +1,18 @@
+name: Keep Hugging Face Space Alive
+
+on:
+  schedule:
+    # Runs automatically every 24 hours at midnight UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch: # Allows you to run it manually from the GitHub UI if you want to test it
+
+jobs:
+  ping-space:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping HF API Gateway
+        run: |
+          echo "Pinging InsafDost API..."
+          # -s hides progress bar, -L follows any Hugging Face redirects
+          curl -s -L https://abdurrafay-codes-insaf-dost-backend.hf.space/health
+          echo -e "\nSuccessfully pinged the Hugging Face Space!"
