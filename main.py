@@ -2,7 +2,8 @@ import os
 import json
 import gc
 import re
-import numpy as np # Added for robust score handling
+import asyncio
+import numpy as np
 from typing import TypedDict, List, Dict, Any, Literal
 
 from fastapi import FastAPI, HTTPException
@@ -208,9 +209,8 @@ def route_guardrail(state: InsafState):
 
 # ── 3. RESOURCE INITIALIZATION ────────────────────────────────────────────────
 def build_and_compile_graph():
-    print("Initializing AI Models and Vector Store...")
-    reasoner = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0, api_key=GROQ_API_KEY) # type: ignore
-    fast_llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0, api_key=GROQ_API_KEY) # type: ignore
+    reasoner = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0, api_key=GROQ_API_KEY)
+    fast_llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0, api_key=GROQ_API_KEY)
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
     
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
@@ -249,32 +249,47 @@ def build_and_compile_graph():
 
     return builder.compile()
 
-# ── 4. FASTAPI APP LIFESPAN & SETUP ───────────────────────────────────────────
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+# Defines the background loader task
+def startup_loader():
     global insaf_graph
     try:
+        print("Starting background model download...")
         insaf_graph = build_and_compile_graph()
         print("✅ Graph compiled successfully and ready to serve requests.")
     except Exception as e:
         print(f"❌ Failed to initialize AI models: {e}")
+
+# ── 4. FASTAPI APP LIFESPAN & SETUP ───────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global insaf_graph
+    
+    # Start the heavy model loading process in a background thread
+    asyncio.create_task(asyncio.to_thread(startup_loader))
+    
     yield
+    
     insaf_graph = None
     gc.collect()
 
 app = FastAPI(title="InsafDost AI API", lifespan=lifespan)
 
+# Applied strictly valid CORS settings (allow_credentials must be False when allow_origins is ["*"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ── 5. API ENDPOINTS ──────────────────────────────────────────────────────────
+@app.get("/")
+def read_root():
+    return {"status": "online", "service": "InsafDost AI Gateway"}
+
 @app.get("/health")
-async def health_check():
+def health_check():
     if insaf_graph is None:
         raise HTTPException(status_code=503, detail="AI Models are still loading.")
     return {"status": "healthy", "message": "InsafDost API is running."}
@@ -289,7 +304,7 @@ def analyze_cases(request: CaseRequest):
     try:
         results = []
         for i, case_text in enumerate(request.cases):
-            res = dict(insaf_graph.invoke({"raw_text": case_text})) # type: ignore
+            res = dict(insaf_graph.invoke({"raw_text": case_text}))
             res['_case_num'] = i + 1
             results.append(res)
         return {"status": "success", "data": results}
