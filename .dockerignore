@@ -1,0 +1,11 @@
+# Exclude git and deployment workflows from the container image layer
+.git
+.github
+README.md
+
+# Exclude local python caches and environment files
+__pycache__/
+*.pyc
+.env
+.venv
+venv/
