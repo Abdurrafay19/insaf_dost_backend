@@ -93,20 +93,21 @@ class GraphNodes:
 
     def processor_node(self, state: InsafState):
         prompt = (
-    "Analyze the following case facts. Extract the core legal doctrines, "
-    "statutes, and formal legal terminology necessary to search a vector database of Pakistani case law. "
-    "Output them as a single search string. "
-    f"Case: {state['raw_text']}"
-)
+            "Analyze the following case facts. Extract the core legal doctrines, "
+            "statutes, and formal legal terminology necessary to search a vector database of Pakistani case law. "
+            "Output them as a single search string. "
+            f"Case: {state['raw_text']}"
+        )
         try:
             if self.processor_llm is None:
                 raise RuntimeError("Structured output not available.")
             data = self.processor_llm.invoke(prompt)
             category = data.category if data.category in {"Criminal", "Civil", "Family"} else "Civil"
-            keywords = data.keywords or state["raw_text"][:50]
+            keywords = data.legal_doctrines if hasattr(data, 'legal_doctrines') else state["raw_text"][:50]
         except Exception:
             category = "Civil"
             keywords = state["raw_text"][:50]
+        
         return {"category": category, "legal_keywords": keywords}
 
     def retriever_node(self, state: InsafState):
@@ -114,8 +115,10 @@ class GraphNodes:
         raw_docs = self.vectorstore.similarity_search_with_score(query, k=10)
 
         if self.reranker and raw_docs:
-            full_query = f"Law of Pakistan regarding {state['category']}: {state['legal_keywords']}"
-            pairs = [[full_query, doc.page_content[:1200]] for doc, _ in raw_docs]
+            client_facts = state['raw_text'][:400]
+            focused_query = f"{client_facts} {state['legal_keywords']}"
+            
+            pairs = [[focused_query, doc.page_content[:1200]] for doc, _ in raw_docs]
 
             try:
                 rr_scores = self.reranker.predict(pairs)
@@ -164,18 +167,20 @@ class GraphNodes:
             source = meta_item.get("source", "Unknown") if isinstance(meta_item, dict) else "Unknown"
             context_lines.append(f"[{i+1}] Authority: {source}\n{p[:15000]}")
         context = "\n".join(context_lines)
+        
         prompt = (
-    f"Act as a senior litigator in Pakistan. Using ONLY the following precedents: {context}.\n\n"
-    f"Analyze this Case: {state['raw_text']}\n\n"
-    f"Format your response using Markdown with the following exact headers:\n"
-    f"### 1. Core Legal Issue\n"
-    f"### 2. Applicable Law & Precedents (Use [Number] citations)\n"
-    f"### 3. Case Analysis\n"
-    f"### 4. Actionable Litigation Strategy\n\n"
-    f"CRITICAL RULES: \n"
-    f"- Under 'Actionable Litigation Strategy', you MUST outline exact court filings, jurisdictional forums (e.g., High Court via Article 199), and evidentiary requirements.\n"
-    f"- DO NOT provide generic administrative advice like 'update policies' or 'train staff'. Focus entirely on winning the case in court."
-)
+            f"Act as a senior litigator in Pakistan. Using ONLY the following precedents: {context}.\n\n"
+            f"Analyze this Case: {state['raw_text']}\n\n"
+            f"Format your response using Markdown with the following exact headers:\n"
+            f"### 1. Core Legal Issue\n"
+            f"### 2. Applicable Law & Precedents (Use [Number] citations)\n"
+            f"### 3. Case Analysis\n"
+            f"### 4. Actionable Litigation Strategy\n\n"
+            f"CRITICAL RULES: \n"
+            f"- Under 'Actionable Litigation Strategy', you MUST outline exact court filings, jurisdictional forums (e.g., High Court via Article 199), and evidentiary requirements.\n"
+            f"- DO NOT provide generic administrative advice like 'update policies' or 'train staff'. Focus entirely on winning the case in court."
+        )
+        
         return {"final_answer": self.reasoner.invoke(prompt).content}
 
     def auditor_node(self, state: InsafState):
@@ -257,7 +262,6 @@ def build_and_compile_graph():
 
     return builder.compile()
 
-# Defines the background loader task
 def startup_loader():
     global insaf_graph
     try:
@@ -272,7 +276,6 @@ def startup_loader():
 async def lifespan(app: FastAPI):
     global insaf_graph
     
-    # Start the heavy model loading process in a background thread
     asyncio.create_task(asyncio.to_thread(startup_loader))
     
     yield
@@ -282,7 +285,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="InsafDost AI API", lifespan=lifespan)
 
-# Applied strictly valid CORS settings (allow_credentials must be False when allow_origins is ["*"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
