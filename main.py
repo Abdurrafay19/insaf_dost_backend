@@ -40,7 +40,7 @@ class GuardrailOutput(BaseModel):
 
 class ProcessorOutput(BaseModel):
     category: Literal["Criminal", "Civil", "Family"]
-    keywords: str
+    legal_doctrines: str
 
 class InsafState(TypedDict):
     raw_text: str
@@ -93,9 +93,11 @@ class GraphNodes:
 
     def processor_node(self, state: InsafState):
         prompt = (
-            "Classify the case as Criminal, Civil, or Family and provide 5 keywords. "
-            f"Case: {state['raw_text']}"
-        )
+    "Analyze the following case facts. Extract the core legal doctrines, "
+    "statutes, and formal legal terminology necessary to search a vector database of Pakistani case law. "
+    "Output them as a single search string. "
+    f"Case: {state['raw_text']}"
+)
         try:
             if self.processor_llm is None:
                 raise RuntimeError("Structured output not available.")
@@ -160,20 +162,26 @@ class GraphNodes:
         for i, p in enumerate(precedents):
             meta_item = precedent_meta[i] if i < len(precedent_meta) else {}
             source = meta_item.get("source", "Unknown") if isinstance(meta_item, dict) else "Unknown"
-            context_lines.append(f"[{i+1}] Authority: {source}\n{p[:1500]}")
+            context_lines.append(f"[{i+1}] Authority: {source}\n{p[:15000]}")
         context = "\n".join(context_lines)
         prompt = (
-            f"Using ONLY precedents: {context}. Analyze Case: {state['raw_text']}. "
-            f"Use [Number] citations. Keep it professional. "
-            f"CRITICAL: Format your response using Markdown. Use **bolding** for key legal terms and Section numbers. "
-            f"Break the analysis into structured paragraphs and use numbered lists for recommended steps."
-        )
+    f"Act as a senior litigator in Pakistan. Using ONLY the following precedents: {context}.\n\n"
+    f"Analyze this Case: {state['raw_text']}\n\n"
+    f"Format your response using Markdown with the following exact headers:\n"
+    f"### 1. Core Legal Issue\n"
+    f"### 2. Applicable Law & Precedents (Use [Number] citations)\n"
+    f"### 3. Case Analysis\n"
+    f"### 4. Actionable Litigation Strategy\n\n"
+    f"CRITICAL RULES: \n"
+    f"- Under 'Actionable Litigation Strategy', you MUST outline exact court filings, jurisdictional forums (e.g., High Court via Article 199), and evidentiary requirements.\n"
+    f"- DO NOT provide generic administrative advice like 'update policies' or 'train staff'. Focus entirely on winning the case in court."
+)
         return {"final_answer": self.reasoner.invoke(prompt).content}
 
     def auditor_node(self, state: InsafState):
         answer = state["final_answer"]
         sentences = [s for s in re.split(r'(?<=[.!?])\s+', answer) if len(s) > 20]
-        context = "\n".join([p[:500] for p in state["precedents"]])
+        context = "\n".join([p for p in state["precedents"]])
 
         audit_prompt = (
             "Verify each sentence against the context. "
