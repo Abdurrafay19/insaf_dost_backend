@@ -112,7 +112,25 @@ class GraphNodes:
 
     def retriever_node(self, state: InsafState):
         query = state["legal_keywords"]
-        raw_docs = self.vectorstore.similarity_search_with_score(query, k=10)
+        
+        qdrant_filter = {
+            "must": [
+                {
+                    "key": "metadata.category",
+                    "match": {"value": state["category"]}
+                }
+            ]
+        }
+        
+        try:
+            raw_docs = self.vectorstore.similarity_search_with_score(
+                query, 
+                k=10,
+                filter=qdrant_filter
+            )
+        except Exception as e:
+            print(f"Filter search failed (fallback to unfiltered): {e}")
+            raw_docs = self.vectorstore.similarity_search_with_score(query, k=10)
 
         if self.reranker and raw_docs:
             client_facts = state['raw_text'][:400]
@@ -172,16 +190,22 @@ class GraphNodes:
             f"Act as a senior litigator in Pakistan. Using ONLY the following precedents: {context}.\n\n"
             f"Analyze this Case: {state['raw_text']}\n\n"
             f"Format your response using Markdown with the following exact headers:\n"
-            f"### 1. Core Legal Issue\n"
-            f"### 2. Applicable Law & Precedents (Use [Number] citations)\n"
-            f"### 3. Case Analysis\n"
+            f"### 1. Core Legal Issue\n\n"
+            f"### 2. Applicable Law & Precedents (Use [Number] citations)\n\n"
+            f"### 3. Case Analysis\n\n"
             f"### 4. Actionable Litigation Strategy\n\n"
             f"CRITICAL RULES: \n"
             f"- Under 'Actionable Litigation Strategy', you MUST outline exact court filings, jurisdictional forums (e.g., High Court via Article 199), and evidentiary requirements.\n"
-            f"- DO NOT provide generic administrative advice like 'update policies' or 'train staff'. Focus entirely on winning the case in court."
+            f"- DO NOT provide generic administrative advice like 'update policies' or 'train staff'. Focus entirely on winning the case in court.\n"
+            f"- MUST leave a clear blank line (double newline) between headers, paragraphs, and list items so standard Markdown parsers can compile it perfectly."
         )
         
-        return {"final_answer": self.reasoner.invoke(prompt).content}
+        raw_response = self.reasoner.invoke(prompt).content
+        
+        cleaned_response = re.sub(r"^```(?:markdown)?\s*", "", raw_response, flags=re.IGNORECASE)
+        cleaned_response = re.sub(r"\s*```$", "", cleaned_response)
+        
+        return {"final_answer": cleaned_response.strip()}
 
     def auditor_node(self, state: InsafState):
         answer = state["final_answer"]
