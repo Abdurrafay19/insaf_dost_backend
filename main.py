@@ -251,6 +251,18 @@ def build_and_compile_graph():
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
     
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    
+    try:
+        from qdrant_client.http import models as qdrant_models
+        qdrant_client.create_payload_index(
+            collection_name="pakistan_law",
+            field_name="metadata.category",
+            field_schema=qdrant_models.PayloadSchemaType.KEYWORD
+        )
+        print("✅ Qdrant payload index for metadata.category verified or created successfully.")
+    except Exception as e:
+        print(f"⚠️ Payload index setup notice: {e}")
+        
     vectorstore = QdrantVectorStore(client=qdrant_client, collection_name="pakistan_law", embedding=embeddings)
     
     try:
