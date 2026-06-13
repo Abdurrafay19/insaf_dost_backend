@@ -40,7 +40,7 @@ class GuardrailOutput(BaseModel):
 
 class ProcessorOutput(BaseModel):
     category: Literal["Criminal", "Civil", "Family"]
-    legal_doctrines: str
+    keywords: str
 
 class InsafState(TypedDict):
     raw_text: str
@@ -103,40 +103,19 @@ class GraphNodes:
                 raise RuntimeError("Structured output not available.")
             data = self.processor_llm.invoke(prompt)
             category = data.category if data.category in {"Criminal", "Civil", "Family"} else "Civil"
-            keywords = data.legal_doctrines if hasattr(data, 'legal_doctrines') else state["raw_text"][:50]
+            keywords = data.keywords or state["raw_text"][:50]
         except Exception:
             category = "Civil"
             keywords = state["raw_text"][:50]
-        
         return {"category": category, "legal_keywords": keywords}
 
     def retriever_node(self, state: InsafState):
         query = state["legal_keywords"]
-        
-        qdrant_filter = {
-            "must": [
-                {
-                    "key": "metadata.category",
-                    "match": {"value": state["category"]}
-                }
-            ]
-        }
-        
-        try:
-            raw_docs = self.vectorstore.similarity_search_with_score(
-                query, 
-                k=10,
-                filter=qdrant_filter
-            )
-        except Exception as e:
-            print(f"Filter search failed (fallback to unfiltered): {e}")
-            raw_docs = self.vectorstore.similarity_search_with_score(query, k=10)
+        raw_docs = self.vectorstore.similarity_search_with_score(query, k=10)
 
         if self.reranker and raw_docs:
-            client_facts = state['raw_text'][:400]
-            focused_query = f"{client_facts} {state['legal_keywords']}"
-            
-            pairs = [[focused_query, doc.page_content[:1200]] for doc, _ in raw_docs]
+            full_query = f"Law of Pakistan regarding {state['category']}: {state['legal_keywords']}"
+            pairs = [[full_query, doc.page_content[:1200]] for doc, _ in raw_docs]
 
             try:
                 rr_scores = self.reranker.predict(pairs)
@@ -145,7 +124,7 @@ class GraphNodes:
                 else:
                     rr_scores_list = [float(rr_scores)]
 
-                MIN_SCORE = 0.0
+                MIN_SCORE = -10.0
                 valid_ranked = [
                     item for item in zip(raw_docs, rr_scores_list)
                     if float(item[1]) > MIN_SCORE
@@ -183,27 +162,29 @@ class GraphNodes:
         for i, p in enumerate(precedents):
             meta_item = precedent_meta[i] if i < len(precedent_meta) else {}
             source = meta_item.get("source", "Unknown") if isinstance(meta_item, dict) else "Unknown"
-            context_lines.append(f"[{i+1}] Authority: {source}\n{p[:15000]}")
+            context_lines.append(f"[{i+1}] Authority: {source}\n{p}")
         context = "\n".join(context_lines)
         
         prompt = (
             f"Act as a senior litigator in Pakistan. Using ONLY the following precedents: {context}.\n\n"
             f"Analyze this Case: {state['raw_text']}\n\n"
-            f"Format your response using Markdown with the following exact headers:\n"
+            f"SYSTEM REQUIREMENT: You MUST format your entire response using Markdown syntax. "
+            f"You MUST explicitly begin each primary section with the literal markdown characters '### ' "
+            f"followed by the exact title name. Do not omit the '### ' symbols under any circumstances.\n\n"
             f"### 1. Core Legal Issue\n\n"
             f"### 2. Applicable Law & Precedents (Use [Number] citations)\n\n"
             f"### 3. Case Analysis\n\n"
             f"### 4. Actionable Litigation Strategy\n\n"
             f"CRITICAL RULES: \n"
-            f"- Under 'Actionable Litigation Strategy', you MUST outline exact court filings, jurisdictional forums (e.g., High Court via Article 199), and evidentiary requirements.\n"
+            f"- Under 'Actionable Litigation Strategy', you MUST outline exact court filings, jurisdictional forums (e.g., Civil Court / High Court), and evidentiary requirements.\n"
             f"- DO NOT provide generic administrative advice like 'update policies' or 'train staff'. Focus entirely on winning the case in court.\n"
             f"- MUST leave a clear blank line (double newline) between headers, paragraphs, and list items so standard Markdown parsers can compile it perfectly."
         )
         
         raw_response = self.reasoner.invoke(prompt).content
         
-        cleaned_response = re.sub(r"^```(?:markdown)?\s*", "", raw_response, flags=re.IGNORECASE)
-        cleaned_response = re.sub(r"\s*```$", "", cleaned_response)
+        cleaned_response = re.sub(r"^\x60\x60\x60(?:markdown)?\s*", "", raw_response, flags=re.IGNORECASE)
+        cleaned_response = re.sub(r"\s*\x60\x60\x60$", "", cleaned_response)
         
         return {"final_answer": cleaned_response.strip()}
 
@@ -251,18 +232,6 @@ def build_and_compile_graph():
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
     
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    
-    try:
-        from qdrant_client.http import models as qdrant_models
-        qdrant_client.create_payload_index(
-            collection_name="pakistan_law",
-            field_name="metadata.category",
-            field_schema=qdrant_models.PayloadSchemaType.KEYWORD
-        )
-        print("✅ Qdrant payload index for metadata.category verified or created successfully.")
-    except Exception as e:
-        print(f"⚠️ Payload index setup notice: {e}")
-        
     vectorstore = QdrantVectorStore(client=qdrant_client, collection_name="pakistan_law", embedding=embeddings)
     
     try:
