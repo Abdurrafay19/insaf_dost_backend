@@ -227,8 +227,8 @@ def route_guardrail(state: InsafState):
 
 # ── 3. RESOURCE INITIALIZATION ────────────────────────────────────────────────
 def build_and_compile_graph():
-    reasoner = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0, api_key=GROQ_API_KEY)
-    fast_llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0, api_key=GROQ_API_KEY)
+    reasoner = ChatGroq(model="openai/gpt-oss-120b", temperature=0.0, api_key=GROQ_API_KEY)
+    fast_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0.0, api_key=GROQ_API_KEY)
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
     
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)

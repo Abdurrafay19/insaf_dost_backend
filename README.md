@@ -45,7 +45,7 @@ This system is built for high reliability and deployed continuously via GitHub A
 ### 🎯 Key Features
 * **LangGraph Reasoning Pipeline:** A robust, multi-stage state graph featuring Guardrail, Processor, Retriever, Reasoner, and Auditor nodes.
 * **Advanced RAG Architecture:** Integrates Qdrant vector databases with `BAAI/bge-reranker-base` cross-encoders to fetch and rank the most contextually relevant legal precedents.
-* **LLM Orchestration:** Leverages Groq's high-speed inference (Llama-3.3-70b and Llama-3.1-8b) to separate complex legal reasoning tasks from rapid structural classification.
+* **LLM Orchestration:** Leverages Groq's high-speed inference (openai/gpt-oss-120b and openai/gpt-oss-20b) to separate complex legal reasoning tasks from rapid structural classification.
 * **Automated Hallucination Auditing:** Includes a dedicated auditor node that scores the final litigation strategy against the retrieved source texts to ensure factual grounding.
 
 ---
@@ -149,7 +149,7 @@ The application workflow follows a directed acyclic graph (DAG) defined in LangG
 1. **Guardrail Node:** Validates if the input is a legitimate legal query.
 2. **Processor Node:** Extracts the legal category (Civil, Criminal, Family) and core search doctrines.
 3. **Retriever Node:** Executes a semantic search in Qdrant, followed by a reranking pass to isolate the top 3 authoritative precedents.
-4. **Reasoner Node:** Generates the comprehensive, Markdown-formatted litigation strategy using the Llama-3.3-70b model.
+4. **Reasoner Node:** Generates the comprehensive, Markdown-formatted litigation strategy using the openai/gpt-oss-120b model.
 5. **Auditor Node:** Cross-references the generated strategy against the retrieved texts to output an accuracy `audit_score`.
 
 ---
