@@ -1,7 +1,6 @@
-# Use Python 3.11 (Highly recommended over 3.13 for PyTorch/ML library stability)
 FROM python:3.11-slim
 
-# Hugging Face Spaces require running as a non-root user for security
+# Run as a non-root user for security
 RUN useradd -m -u 1000 user
 USER user
 ENV HOME=/home/user \
@@ -28,16 +27,14 @@ USER user
 COPY --chown=user requirements.txt ./
 
 # Install Python dependencies
-# We use --no-cache-dir to keep the image size small
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-# Copy the rest of the backend source code (main.py, ingest.py, etc.)
+# Copy the rest of the backend source code
 COPY --chown=user . .
 
-# Hugging Face Spaces exposes port 7860 by default
 EXPOSE 7860
 
-# FastAPI Healthcheck (points to the /health endpoint we created)
+# FastAPI Healthcheck
 HEALTHCHECK CMD curl --fail http://localhost:7860/health || exit 1
 
 # Start the FastAPI server using Uvicorn on port 7860
