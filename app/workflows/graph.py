@@ -237,6 +237,7 @@ class AsyncGraphNodes:
                     "### 3. Case Analysis\n\n"
                     "### 4. Actionable Litigation Strategy\n\n"
                     "Rules:\n"
+                    "- STRICT FORMATTING RULE: NEVER use Markdown tables or pipe characters (|) for layout. Always use standard bullet points (- or *) or numbered lists.\n"
                     "- In Section 4, state exact court forums, specific petitions/applications, and evidentiary requirements.\n"
                     "- Avoid administrative generalities; focus strictly on litigation.\n"
                     "- Maintain clean newlines between headers and sections.",
