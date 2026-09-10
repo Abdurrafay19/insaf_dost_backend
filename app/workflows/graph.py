@@ -38,18 +38,22 @@ class AsyncGraphNodes:
             self.processor_llm = None
 
     async def guardrail_node(self, state: InsafState):
-        prompt = ChatPromptTemplate.from_template(
-            "Is this text a valid legal scenario, question, or case? Text: {raw_text}"
-        )
-        formatted_prompt = prompt.format(raw_text=state['raw_text'])
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an automated legal classification gateway. Determine whether the input is a valid legal case, question, or scenario."),
+            ("human", "{raw_text}")
+        ])
         
         try:
             if self.guardrail_llm is None:
                 raise RuntimeError("Structured output not available.")
-            data = await self.guardrail_llm.ainvoke(formatted_prompt)
+            
+            # Pipe prompt directly to retain chat message roles for tool-calling
+            chain = prompt | self.guardrail_llm
+            data = await chain.ainvoke({"raw_text": state["raw_text"]})
             is_valid = bool(data.is_valid)
-        except Exception:
-            # Fail-closed architecture: Reject if parser fails
+        except Exception as e:
+            # Logs the exact API error in the container console if Groq rejects the payload
+            print(f"Guardrail failed to invoke LLM: {e}")
             is_valid = False
 
         if not is_valid:
@@ -65,20 +69,20 @@ class AsyncGraphNodes:
         return {"is_valid": True}
 
     async def processor_node(self, state: InsafState):
-        prompt = ChatPromptTemplate.from_template(
-            "Analyze the following case facts. Extract the core legal doctrines, "
-            "statutes, and formal legal terminology necessary to search a vector database of Pakistani case law. "
-            "Output them as a single search string. Case: {raw_text}"
-        )
-        formatted_prompt = prompt.format(raw_text=state['raw_text'])
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Analyze the following case facts. Extract the core legal doctrines, statutes, and formal legal terminology necessary to search a vector database of Pakistani case law. Output them as a single search string."),
+            ("human", "{raw_text}")
+        ])
         
         try:
             if self.processor_llm is None:
                 raise RuntimeError("Structured output not available.")
-            data = await self.processor_llm.ainvoke(formatted_prompt)
+            chain = prompt | self.processor_llm
+            data = await chain.ainvoke({"raw_text": state["raw_text"]})
             category = data.category if data.category in {"Criminal", "Civil", "Family"} else "Civil"
             keywords = data.keywords or state["raw_text"][:50]
-        except Exception:
+        except Exception as e:
+            print(f"Processor failed to invoke LLM: {e}")
             category = "Civil"
             keywords = state["raw_text"][:50]
             
