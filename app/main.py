@@ -94,18 +94,33 @@ async def analyze_cases(request: CaseRequest, graph=Depends(get_graph)):
     if not request.cases:
         raise HTTPException(status_code=400, detail="No cases provided.")
 
-    try:
-        # Utilize asyncio.gather to concurrently process multiple cases in a single payload
-        tasks = [graph.ainvoke({"raw_text": case_text}) for case_text in request.cases]
-        results_raw = await asyncio.gather(*tasks)
+    results = []
+    
+    # Process cases sequentially with brief pacing to respect Groq's 8,000 TPM limit
+    for i, case_text in enumerate(request.cases):
+        max_retries = 3
+        backoff = 10.0  # Groq's error requested ~9.03s
         
-        results = []
-        for i, res in enumerate(results_raw):
-            res_dict = dict(res)
-            res_dict['_case_num'] = i + 1
-            results.append(res_dict)
+        for attempt in range(max_retries):
+            try:
+                res = await graph.ainvoke({"raw_text": case_text})
+                res_dict = dict(res)
+                res_dict['_case_num'] = i + 1
+                results.append(res_dict)
+                break
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "rate_limit_exceeded" in err_str:
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Hit TPM rate limit on case {i+1}. Pausing for {backoff}s before retry...")
+                        await asyncio.sleep(backoff)
+                        backoff *= 1.5
+                        continue
+                logging.error(f"Inference execution error on case {i+1}: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Inference execution error during case {i+1}.")
+
+        # Small 2-second buffer between cases to allow token window replenishment
+        if i < len(request.cases) - 1:
+            await asyncio.sleep(2.0)
             
-        return {"status": "success", "data": results}
-    except Exception as e:
-        logging.error("Inference execution error", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal server error occurred during case analysis.")
+    return {"status": "success", "data": results}
