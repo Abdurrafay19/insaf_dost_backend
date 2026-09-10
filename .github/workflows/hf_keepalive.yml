@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs automatically every 24 hours at midnight UTC
     - cron: "0 0 * * *"
-  workflow_dispatch: # Allows you to run it manually from the GitHub UI if you want to test it
+  workflow_dispatch:
 
 jobs:
   ping-space:
