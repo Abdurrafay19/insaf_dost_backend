@@ -1,12 +1,12 @@
-from qdrant_client import AsyncQdrantClient
+from qdrant_client import QdrantClient
 from langchain_qdrant import QdrantVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 
 def get_async_vectorstore(qdrant_url: str, qdrant_api_key: str) -> QdrantVectorStore:
-    client = AsyncQdrantClient(
+    client = QdrantClient(
         url=qdrant_url,
         api_key=qdrant_api_key,
-        prefer_grpc=True,
+        prefer_grpc=False,
         timeout=15
     )
     embeddings = HuggingFaceEmbeddings(

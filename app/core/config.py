@@ -2,9 +2,9 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    groq_api_key: str
-    qdrant_url: str
-    qdrant_api_key: str
+    groq_api_key: str = ""
+    qdrant_url: str = ""
+    qdrant_api_key: str = ""
     environment: str = "production"
 
     model_config = SettingsConfigDict(
