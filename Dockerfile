@@ -41,4 +41,4 @@ EXPOSE 7860
 HEALTHCHECK CMD curl --fail http://localhost:7860/health || exit 1
 
 # Start the FastAPI server using Uvicorn on port 7860
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
