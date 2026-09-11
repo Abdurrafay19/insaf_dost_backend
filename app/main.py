@@ -1,10 +1,12 @@
 import gc
+import json
 import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -14,6 +16,14 @@ from app.services.vectorstore import get_async_vectorstore
 from app.workflows.graph import build_async_graph
 
 logging.basicConfig(level=logging.INFO)
+
+NODE_LABELS = {
+    "guardrail": "Validating legal dispute applicability",
+    "processor": "Extracting statutory doctrines & search terminology",
+    "retriever": "Querying Qdrant & executing cross-encoder rerank",
+    "reasoner": "Formulating appellate legal opinion",
+    "auditor": "Auditing factual grounding score",
+}
 
 
 class CaseRequest(BaseModel):
@@ -158,7 +168,6 @@ async def analyze_cases(request: CaseRequest, graph=Depends(get_graph)):
                     status_code=500, detail=f"Inference error during case {i+1}."
                 )
 
-        # 2-second replenishment buffer between cases
         if i < len(request.cases) - 1:
             print("[REQUEST] Pausing 2.0s between cases to replenish tokens...")
             await asyncio.sleep(2.0)
@@ -167,3 +176,80 @@ async def analyze_cases(request: CaseRequest, graph=Depends(get_graph)):
         f"\n[REQUEST] Batch processing completed successfully for {len(results)} case(s).\n"
     )
     return {"status": "success", "data": results}
+
+
+@app.post("/analyze/stream")
+async def analyze_cases_stream(request: CaseRequest, graph=Depends(get_graph)):
+    if not request.cases:
+        raise HTTPException(status_code=400, detail="No cases provided.")
+
+    async def event_generator():
+        total_cases = len(request.cases)
+
+        for i, case_text in enumerate(request.cases):
+            case_num = i + 1
+            yield f"data: {json.dumps({'type': 'case_start', 'case_num': case_num, 'total_cases': total_cases})}\n\n"
+
+            max_retries = 3
+            backoff = 10.0
+            case_succeeded = False
+
+            for attempt in range(max_retries):
+                state_accumulator = {"raw_text": case_text}
+                current_node = "guardrail"
+
+                try:
+                    yield f"data: {json.dumps({'type': 'node_start', 'case_num': case_num, 'node': current_node, 'label': NODE_LABELS[current_node]})}\n\n"
+
+                    async for update_chunk in graph.astream(
+                        {"raw_text": case_text}, stream_mode="updates"
+                    ):
+                        for completed_node, node_output in update_chunk.items():
+                            state_accumulator.update(node_output)
+                            yield f"data: {json.dumps({'type': 'node_complete', 'case_num': case_num, 'node': completed_node})}\n\n"
+
+                            next_nodes = {
+                                "guardrail": (
+                                    "processor"
+                                    if state_accumulator.get("is_valid")
+                                    else None
+                                ),
+                                "processor": "retriever",
+                                "retriever": "reasoner",
+                                "reasoner": "auditor",
+                                "auditor": None,
+                            }
+                            next_node = next_nodes.get(completed_node)
+                            if next_node:
+                                yield f"data: {json.dumps({'type': 'node_start', 'case_num': case_num, 'node': next_node, 'label': NODE_LABELS[next_node]})}\n\n"
+
+                    state_accumulator["_case_num"] = case_num
+                    yield f"data: {json.dumps({'type': 'case_complete', 'case_num': case_num, 'data': state_accumulator})}\n\n"
+                    case_succeeded = True
+                    break
+
+                except Exception as e:
+                    err_str = str(e)
+                    if (
+                        "429" in err_str or "rate_limit_exceeded" in err_str
+                    ) and attempt < max_retries - 1:
+                        await asyncio.sleep(backoff)
+                        backoff *= 1.5
+                        continue
+                    yield f"data: {json.dumps({'type': 'error', 'case_num': case_num, 'detail': err_str})}\n\n"
+                    break
+
+            if i < total_cases - 1 and case_succeeded:
+                await asyncio.sleep(2.0)
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
