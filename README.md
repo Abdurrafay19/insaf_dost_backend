@@ -8,121 +8,244 @@ app_port: 7860
 pinned: false
 ---
 
-<div align="center">
+# InsafDost AI Backend
 
-  # InsafDost AI Backend
-
-  **Production API Gateway and multi-agent reasoning engine for enterprise-grade Pakistani legal analysis.**
-
-  <p>
-    <img alt="Hugging Face Space" src="https://img.shields.io/badge/Deployed_on-Hugging_Face-FFD21E?logo=huggingface&logoColor=black" />
-    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-005571?style=flat&logo=fastapi" />
-    <img alt="Python 3.11" src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" />
-    <img alt="License" src="https://img.shields.io/badge/License-MIT-green.svg" />
-  </p>
-</div>
+Asynchronous REST API and state-graph execution engine for automated Pakistani legal reasoning, precedent retrieval from Qdrant, and factual consistency auditing.
 
 ---
 
-## 📖 Table of Contents
-- [About the Project](#-about-the-project)
-- [Key Features](#-key-features)
-- [Tech Stack](#-tech-stack)
-- [Getting Started](#-getting-started)
-- [Usage](#-usage)
-- [System Architecture](#-system-architecture)
-- [Contributing](#-contributing)
-- [License](#-license)
+## Technical Overview
+
+The application processes legal scenarios through an asynchronous LangGraph execution pipeline. Inbound text is validated through a fail-closed classification guardrail, categorized into civil, criminal, or family jurisdictions, queried against a dense vector store of Pakistani case law, reranked via a cross-encoder, synthesized into an appellate litigation strategy, and factually audited before response serialization.
+
+```text
+Client Request
+      │
+      ▼
+┌──────────────┐
+│  /analyze    │  FastAPI (Sequential batch processing with token backoff)
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ LangGraph State Machine (InsafState)                             │
+│                                                                  │
+│  [guardrail] ──(is_valid=False)──► END (Rejection payload)       │
+│        │                                                         │
+│   (is_valid=True)                                                │
+│        ▼                                                         │
+│  [processor] ──► Extracts category and statutory search terms    │
+│        │                                                         │
+│        ▼                                                         │
+│  [retriever] ──► Qdrant ANN search (k=8) + BGE cross-encoder     │
+│        │         (Thread-offloaded CPU inference with sigmoid)   │
+│        ▼                                                         │
+│  [reasoner]  ──► Groq openai/gpt-oss-120b legal synthesis        │
+│        │                                                         │
+│        ▼                                                         │
+│  [auditor]   ──► Groq openai/gpt-oss-20b grounding audit         │
+│        │                                                         │
+│        ▼                                                         │
+│       END                                                        │
+└──────────────────────────────────┬───────────────────────────────┘
+                                   │
+                                   ▼
+                       Structured JSON Response
+
+```
 
 ---
 
-## 🚀 About the Project
+## System Architecture
 
-The InsafDost AI Backend is a standalone server designed to process complex legal scenarios and formulate actionable litigation strategies based on Pakistani case law. Serving as the core intelligence layer, this API ingests raw case descriptions, extracts legal doctrines, and retrieves the most relevant precedents to generate highly accurate, court-ready outputs.
-
-This system is built for high reliability and deployed continuously via GitHub Actions to Hugging Face Spaces. It uses a graph-based state machine to ensure every legal query passes through strict guardrails, vector retrieval, cross-encoder reranking, and an automated factual audit before returning a response.
-
-### 🎯 Key Features
-* **LangGraph Reasoning Pipeline:** A robust, multi-stage state graph featuring Guardrail, Processor, Retriever, Reasoner, and Auditor nodes.
-* **Advanced RAG Architecture:** Integrates Qdrant vector databases with `BAAI/bge-reranker-base` cross-encoders to fetch and rank the most contextually relevant legal precedents.
-* **LLM Orchestration:** Leverages Groq's high-speed inference (openai/gpt-oss-120b and openai/gpt-oss-20b) to separate complex legal reasoning tasks from rapid structural classification.
-* **Automated Hallucination Auditing:** Includes a dedicated auditor node that scores the final litigation strategy against the retrieved source texts to ensure factual grounding.
+* **Decoupled Lifecycle Initialization:** Model downloads run inside an `asyncio.create_task` during the FastAPI lifespan context. Liveness probes respond immediately during startup without triggering orchestration timeout terminations.
+* **Fail-Closed Guardrails:** The guardrail node employs defensive JSON parsing with fallback inspection across boolean keys. If the classification model returns malformed data or fails, the pipeline sets `is_valid = False` and terminates progression.
+* **Two-Stage Retrieval Pipeline:** Performs approximate nearest-neighbor search against the Qdrant `pakistan_law` collection, followed by cross-encoder reranking via `BAAI/bge-reranker-base`. Cross-encoder matrix calculations run in a worker thread via `asyncio.to_thread` to prevent event loop blocking. Logits are mapped to probabilities via sigmoid activation and filtered at a calibrated threshold (`prob >= 0.40`).
+* **Rate-Limit Pacing:** Batch requests to `/analyze` execute sequentially with a 2-second inter-case buffer and exponential backoff retry handling upon receiving HTTP 429 status codes from Groq.
+* **Markdown Formatting Constraints:** The reasoning prompt restricts Markdown tables and pipe characters (`|`), mandating bulleted lists to prevent frontend parsing failures.
 
 ---
 
-## 🛠 Tech Stack
+## Directory Structure
 
-* **API Framework:** FastAPI, Uvicorn, Pydantic
-* **AI & Orchestration:** LangChain, LangGraph, Groq API
-* **Embeddings & Retrieval:** Qdrant Vector Store, Hugging Face `all-MiniLM-L6-v2`, Sentence Transformers
-* **Infrastructure:** Docker, Hugging Face Spaces, GitHub Actions (CI/CD)
+```text
+InsafDostBackend/
+├── app/
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── config.py          # Pydantic BaseSettings environment validation
+│   ├── services/
+│   │   ├── __init__.py
+│   │   └── vectorstore.py     # Qdrant client connection and HuggingFaceEmbeddings
+│   ├── workflows/
+│   │   ├── __init__.py
+│   │   └── graph.py           # LangGraph StateGraph, node logic, and routing
+│   ├── __init__.py
+│   └── main.py                # FastAPI app, lifespan handler, CORS, and endpoints
+├── .dockerignore
+├── .env.example
+├── .gitattributes
+├── .gitignore
+├── CODE_OF_CONDUCT.md
+├── Dockerfile                 # Container definition targeting Python 3.11-slim
+├── LICENSE.md
+├── ping_qdrant.py             # Qdrant cluster connectivity utility
+├── README.md
+└── requirements.txt           # Pinned Python dependencies
+
+```
 
 ---
 
-## ⚙️ Getting Started
+## Dependencies and Runtime
 
-Follow these steps to set up the InsafDost backend locally.
+| Component | Technology | Version / Target |
+| --- | --- | --- |
+| Runtime | Python | 3.11-slim |
+| Web Framework | FastAPI | 0.136.1 |
+| ASGI Server | Uvicorn | 0.46.0 |
+| Workflow Engine | LangGraph | 1.1.10 |
+| Legal Reasoning LLM | Groq API (`openai/gpt-oss-120b`) | Temperature 0.0 |
+| Classification LLM | Groq API (`openai/gpt-oss-20b`) | Temperature 0.0 |
+| Vector Store | Qdrant Cloud | Client 1.17.1 |
+| Embedding Model | `sentence-transformers/all-MiniLM-L6-v2` | CPU |
+| Cross-Encoder Reranker | `BAAI/bge-reranker-base` | CPU (512 max length) |
+| Configuration Management | Pydantic Settings | 2.15.0 |
 
-### Prerequisites
-* Python 3.11 (Recommended for maximum ML library stability)
-* Access to [Groq API](https://console.groq.com/)
-* A [Qdrant Database](https://qdrant.tech/) instance 
+---
 
-### Installation
+## Prerequisites
+
+* Python 3.11
+* Active Qdrant Cloud cluster with an initialized `pakistan_law` collection
+* Groq API account with active API credentials
+
+---
+
+## Configuration
+
+The service reads configuration values from environment variables via `app/core/config.py`.
+
+Create a `.env` file in the project root:
+
+```bash
+cp .env.example .env
+
+```
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `GROQ_API_KEY` | string | None | Authorization key for Groq Cloud API endpoints. |
+| `QDRANT_URL` | string | None | HTTPS endpoint URL of the Qdrant cluster. |
+| `QDRANT_API_KEY` | string | None | API key for Qdrant Cloud authentication. |
+
+---
+
+## Installation and Local Setup
+
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/Abdurrafay19/insaf_dost_backend.git
-   ```
 
-2. Navigate to the project directory:
-   ```bash
-   cd insaf_dost_backend
-   ```
+```bash
+git clone https://github.com/Abdurrafay19/insaf_dost_backend.git
+cd insaf_dost_backend
 
-3. Install dependencies:
-   ```bash
-   pip install --no-cache-dir -r requirements.txt
-   ```
+```
 
-4. Set up environment variables by creating a `.env` file in the root directory:
-   ```env
-   GROQ_API_KEY=your_groq_api_key_here
-   QDRANT_URL=your_qdrant_cluster_url
-   QDRANT_API_KEY=your_qdrant_api_key
-   ```
+1. Create and activate a Python 3.11 virtual environment:
 
-5. Run the application:
-   ```bash
-   uvicorn main:app --host 0.0.0.0 --port 7860 --reload
-   ```
+```bash
+python3.11 -m venv venv
+source venv/bin/activate
 
+```
 
+1. Install dependencies:
+
+```bash
+pip install --no-cache-dir -r requirements.txt
+
+```
+
+1. Verify Qdrant connectivity:
+
+```bash
+python ping_qdrant.py
+
+```
+
+1. Run the development server:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 7860 --reload
+
+```
 
 ---
 
-## 💡 Usage
+## API Reference
 
-Once the server is running (and the AI models have finished loading into memory), you can interact with the API via standard HTTP requests.
+### Liveness Probe
 
-**Health Check Endpoint**
+Verifies that the ASGI web server is responsive.
 
 ```bash
 curl -X GET http://localhost:7860/health
+
 ```
 
-**Analyze Case Endpoint**
+Expected response (`200 OK`):
+
+```json
+{
+  "status": "healthy",
+  "service": "InsafDost AI Gateway"
+}
+
+```
+
+### Readiness Probe
+
+Verifies whether model weights are loaded and the LangGraph pipeline is compiled.
+
+```bash
+curl -X GET http://localhost:7860/ready
+
+```
+
+Expected response when initialized (`200 OK`):
+
+```json
+{
+  "status": "ready"
+}
+
+```
+
+Expected response while loading (`503 Service Unavailable`):
+
+```json
+{
+  "detail": "AI models are still loading."
+}
+
+```
+
+### Case Analysis
+
+Processes a list of legal scenario texts through the classification, retrieval, reasoning, and auditing pipeline.
 
 ```bash
 curl -X POST http://localhost:7860/analyze \
   -H "Content-Type: application/json" \
   -d '{
     "cases": [
-      "A tenant has refused to pay rent for 6 months and is refusing to vacate the commercial property in Lahore despite multiple legal notices."
+      "A shopkeeper in Karachi used tampered weighing scales to shortchange customers and threatened physical violence when confronted."
     ]
   }'
+
 ```
 
-**Expected JSON Response:**
+Expected response (`200 OK`):
 
 ```json
 {
@@ -130,42 +253,52 @@ curl -X POST http://localhost:7860/analyze \
   "data": [
     {
       "is_valid": true,
-      "category": "Civil",
-      "legal_keywords": "eviction commercial property rent default tenant",
-      "final_answer": "### 1. Core Legal Issue\n...",
-      "audit_score": 0.95,
+      "category": "Criminal",
+      "legal_keywords": "Pakistan Penal Code Section 264 265 fraudulent weights Section 506 criminal intimidation",
+      "precedents": [
+        "Criminal Revision No. 412: In cases concerning fraudulent weights under Section 264 PPC..."
+      ],
+      "precedent_meta": [
+        {
+          "source": "Court Precedent",
+          "score": 0.871
+        }
+      ],
+      "final_answer": "### 1. Core Legal Issue\n\nWhether the use of fraudulent balance scales constitutes an offense under Section 264/265 of the Pakistan Penal Code (PPC) and whether verbal threats constitute criminal intimidation under Section 506 PPC.\n\n### 2. Applicable Law & Precedents\n\n- [1] Criminal Revision No. 412 - Establishes evidentiary requirements for seizing weighing mechanisms.\n\n### 3. Case Analysis\n\nThe accused intentionally employed tampered measurement devices...\n\n### 4. Actionable Litigation Strategy\n\n- Forum: Judicial Magistrate 1st Class having local territorial jurisdiction.\n- Application: File formal complaint under Section 190 CrPC or direct FIR registration under Section 154 CrPC for cognizable offenses.\n- Evidence Required: Seizure memo of the scale verified by Inspector of Weights and Measures.",
+      "audit_score": 0.92,
       "_case_num": 1
     }
   ]
 }
+
 ```
 
 ---
 
-## 🏗 System Architecture
+## Container Deployment
 
-The application workflow follows a directed acyclic graph (DAG) defined in LangGraph:
+The application includes a `Dockerfile` targeting containerized platforms and Hugging Face Spaces using non-root execution on port `7860`.
 
-1. **Guardrail Node:** Validates if the input is a legitimate legal query.
-2. **Processor Node:** Extracts the legal category (Civil, Criminal, Family) and core search doctrines.
-3. **Retriever Node:** Executes a semantic search in Qdrant, followed by a reranking pass to isolate the top 3 authoritative precedents.
-4. **Reasoner Node:** Generates the comprehensive, Markdown-formatted litigation strategy using the openai/gpt-oss-120b model.
-5. **Auditor Node:** Cross-references the generated strategy against the retrieved texts to output an accuracy `audit_score`.
+Build the image:
+
+```bash
+docker build -t insafdost-backend:latest .
+
+```
+
+Run the container:
+
+```bash
+docker run -d \
+  --name insafdost-service \
+  -p 7860:7860 \
+  --env-file .env \
+  insafdost-backend:latest
+
+```
 
 ---
 
-## 🤝 Contributing
+## License
 
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See `LICENSE.md` for details.
