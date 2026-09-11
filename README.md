@@ -18,15 +18,18 @@ Asynchronous REST API and state-graph execution engine for automated Pakistani l
 
 The application processes legal scenarios through an asynchronous LangGraph execution pipeline. Inbound text is validated through a fail-closed classification guardrail, categorized into civil, criminal, or family jurisdictions, queried against a dense vector store of Pakistani case law, reranked via a cross-encoder, synthesized into an appellate litigation strategy, and factually audited before response serialization.
 
+The service exposes both a synchronous batch endpoint (`/analyze`) and a real-time Server-Sent Events (SSE) streaming endpoint (`/analyze/stream`) to track node-by-node execution state dynamically.
+
 ```text
 Client Request
       │
       ▼
-┌──────────────┐
-│  /analyze    │  FastAPI (Sequential batch processing with token backoff)
-└──────┬───────┘
-       │
-       ▼
+┌────────────────────────┐
+│  /analyze              │  FastAPI (Sequential batch processing with token backoff)
+│  /analyze/stream       │  FastAPI StreamingResponse (Real-time SSE event pipeline)
+└───────────┬────────────┘
+            │
+            ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │ LangGraph State Machine (InsafState)                             │
 │                                                                  │
@@ -50,7 +53,7 @@ Client Request
 └──────────────────────────────────┬───────────────────────────────┘
                                    │
                                    ▼
-                       Structured JSON Response
+          Structured JSON / Server-Sent Event (SSE) Stream
 
 ```
 
@@ -61,7 +64,8 @@ Client Request
 * **Decoupled Lifecycle Initialization:** Model downloads run inside an `asyncio.create_task` during the FastAPI lifespan context. Liveness probes respond immediately during startup without triggering orchestration timeout terminations.
 * **Fail-Closed Guardrails:** The guardrail node employs defensive JSON parsing with fallback inspection across boolean keys. If the classification model returns malformed data or fails, the pipeline sets `is_valid = False` and terminates progression.
 * **Two-Stage Retrieval Pipeline:** Performs approximate nearest-neighbor search against the Qdrant `pakistan_law` collection, followed by cross-encoder reranking via `BAAI/bge-reranker-base`. Cross-encoder matrix calculations run in a worker thread via `asyncio.to_thread` to prevent event loop blocking. Logits are mapped to probabilities via sigmoid activation and filtered at a calibrated threshold (`prob >= 0.40`).
-* **Rate-Limit Pacing:** Batch requests to `/analyze` execute sequentially with a 2-second inter-case buffer and exponential backoff retry handling upon receiving HTTP 429 status codes from Groq.
+* **Real-Time Execution Streaming (SSE):** The `/analyze/stream` endpoint consumes LangGraph's `astream(stream_mode="updates")` to yield discrete event frames (`case_start`, `node_start`, `node_complete`, `case_complete`, `done`). It emits `X-Accel-Buffering: no` headers to bypass reverse-proxy buffering on Hugging Face Spaces.
+* **Rate-Limit Pacing:** Requests execute sequentially with a 2-second inter-case buffer and exponential backoff retry handling upon receiving HTTP 429 status codes from Groq.
 * **Markdown Formatting Constraints:** The reasoning prompt restricts Markdown tables and pipe characters (`|`), mandating bulleted lists to prevent frontend parsing failures.
 
 ---
@@ -138,6 +142,7 @@ cp .env.example .env
 | `GROQ_API_KEY` | string | None | Authorization key for Groq Cloud API endpoints. |
 | `QDRANT_URL` | string | None | HTTPS endpoint URL of the Qdrant cluster. |
 | `QDRANT_API_KEY` | string | None | API key for Qdrant Cloud authentication. |
+| `ENVIRONMENT` | string | `production` | Deployment environment identifier. |
 
 ---
 
@@ -230,9 +235,55 @@ Expected response while loading (`503 Service Unavailable`):
 
 ```
 
-### Case Analysis
+### Real-Time Case Streaming (SSE)
 
-Processes a list of legal scenario texts through the classification, retrieval, reasoning, and auditing pipeline.
+Streams real-time pipeline execution progress, node transitions, and output payloads via Server-Sent Events (SSE). Use unbuffered output (`-N`) when testing via CLI.
+
+```bash
+curl -N -X POST http://localhost:7860/analyze/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cases": [
+      "A tenant refuses to vacate commercial premises in Lahore after the lease expired and defaults on 4 months rent."
+    ]
+  }'
+
+```
+
+Expected stream sequence (`text/event-stream`):
+
+```text
+data: {"type": "case_start", "case_num": 1, "total_cases": 1}
+
+data: {"type": "node_start", "case_num": 1, "node": "guardrail", "label": "Validating legal dispute applicability"}
+
+data: {"type": "node_complete", "case_num": 1, "node": "guardrail"}
+
+data: {"type": "node_start", "case_num": 1, "node": "processor", "label": "Extracting statutory doctrines & search terminology"}
+
+data: {"type": "node_complete", "case_num": 1, "node": "processor"}
+
+data: {"type": "node_start", "case_num": 1, "node": "retriever", "label": "Querying Qdrant & executing cross-encoder rerank"}
+
+data: {"type": "node_complete", "case_num": 1, "node": "retriever"}
+
+data: {"type": "node_start", "case_num": 1, "node": "reasoner", "label": "Formulating appellate legal opinion"}
+
+data: {"type": "node_complete", "case_num": 1, "node": "reasoner"}
+
+data: {"type": "node_start", "case_num": 1, "node": "auditor", "label": "Auditing factual grounding score"}
+
+data: {"type": "node_complete", "case_num": 1, "node": "auditor"}
+
+data: {"type": "case_complete", "case_num": 1, "data": {"raw_text": "...", "is_valid": true, "category": "Civil", "legal_keywords": "...", "precedents": ["..."], "precedent_meta": [{"source": "...", "score": 0.52}], "final_answer": "...", "audit_score": 0.6, "_case_num": 1}}
+
+data: {"type": "done"}
+
+```
+
+### Case Analysis (Synchronous Batch)
+
+Processes a list of legal scenario texts through the classification, retrieval, reasoning, and auditing pipeline in a single synchronous response payload.
 
 ```bash
 curl -X POST http://localhost:7860/analyze \
