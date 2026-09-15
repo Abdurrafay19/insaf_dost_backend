@@ -22,40 +22,25 @@ The application processes legal scenarios through an asynchronous LangGraph exec
 
 The service exposes both a synchronous batch endpoint (`/analyze`) and a real-time Server-Sent Events (SSE) streaming endpoint (`/analyze/stream`) to track node-by-node execution state dynamically.
 
-```text
-Client Request
-      │
-      ▼
-┌────────────────────────┐
-│  /analyze              │  FastAPI (Sequential batch processing with token backoff)
-│  /analyze/stream       │  FastAPI StreamingResponse (Real-time SSE event pipeline)
-└───────────┬────────────┘
-            │
-            ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ LangGraph State Machine (InsafState)                             │
-│                                                                  │
-│  [guardrail] ──(is_valid=False)──► END (Rejection payload)       │
-│        │                                                         │
-│   (is_valid=True)                                                │
-│        ▼                                                         │
-│  [processor] ──► Extracts category and statutory search terms    │
-│        │                                                         │
-│        ▼                                                         │
-│  [retriever] ──► Qdrant ANN search (k=8) + BGE cross-encoder     │
-│        │         (Thread-offloaded CPU inference with sigmoid)   │
-│        ▼                                                         │
-│  [reasoner]  ──► Groq openai/gpt-oss-120b legal synthesis        │
-│        │                                                         │
-│        ▼                                                         │
-│  [auditor]   ──► Groq openai/gpt-oss-20b grounding audit         │
-│        │                                                         │
-│        ▼                                                         │
-│       END                                                        │
-└──────────────────────────────────┬───────────────────────────────┘
-                                   │
-                                   ▼
-          Structured JSON / Server-Sent Event (SSE) Stream
+```mermaid
+flowchart TD
+    A[Client Request] --> B{Route endpoint}
+    B -- /analyze --> C["FastAPI Batch<br/>(sequential processing, token backoff)"]
+    B -- /analyze/stream --> D["FastAPI StreamingResponse<br/>(real-time SSE event pipeline)"]
+
+    C --> E{Guardrail check}
+    D --> E
+
+    E -- is_valid = False --> F["Reject request<br/>(rejection payload)"]
+    E -- is_valid = True --> G["Processor<br/>(extract category & statutory search terms)"]
+
+    G --> H["Retriever<br/>(Qdrant ANN k=8, BGE cross-encoder)"]
+    H --> I["Reasoner<br/>(Groq gpt-oss-120b legal synthesis)"]
+    I --> J["Auditor<br/>(Groq gpt-oss-20b grounding audit)"]
+
+    J --> K["Success response<br/>(structured JSON or SSE stream)"]
+    F --> L[Done]
+    K --> L
 
 ```
 
