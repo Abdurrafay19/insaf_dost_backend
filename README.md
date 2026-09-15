@@ -57,6 +57,77 @@ flowchart TD
 
 ---
 
+## The benchmark
+
+`benchmarks/dataset.py` contains a 350-sample empirical testbed spanning the three core execution subsystems: 200 colloquial legal queries across 20 statutory frameworks, 100 input guardrail cases (50 genuine disputes, 25 out-of-domain queries, 25 adversarial prompt injections), and 50 statutory grounding audits (20 grounded opinions, 15 procedural extrapolations, 15 fabricated statutes). The retrieval testbed intentionally omits statute titles, acts, and section numbers to evaluate true semantic retrieval against raw, messy user phrasing.
+
+```bash
+python -m benchmarks.benchmark
+```
+
+This runs all 350 test cases through the decoupled subsystems, records per-query execution latencies, calculates statistical classification and retrieval metrics, and serializes the complete telemetry payload to `benchmarks/results.json`.
+
+### Results
+
+Evaluated on `openai/gpt-oss-20b` (temperature 0.0), `sentence-transformers/all-MiniLM-L6-v2`, and `BAAI/bge-reranker-base` on CPU against Qdrant Cloud (`pakistan_law`). Total wall-clock runtime: 1,348.26s.
+
+#### 1. Retrieval Engine Performance (N = 200 Queries)
+
+| Metric | Dense Search (k=8) | Dense + BGE-Reranker | Absolute Delta | Relative Delta |
+| --- | --- | --- | --- | --- |
+| Hit@1 | 31.5% | 37.5% | +6.0% | +19.0% |
+| Hit@3 | 47.0% | 49.5% | +2.5% | +5.3% |
+| Hit@5 | 55.0% | 55.5% | +0.5% | +0.9% |
+| MRR@3 | 0.383 | 0.428 | +0.045 | +11.7% |
+| Mean Latency | 2124.14ms | 2124.14ms | - | - |
+| P95 Latency | 2451.64ms | 2451.64ms | - | - |
+
+Cross-encoder reranking surfaced relevant authorities to Rank 1 on 12 queries that dense retrieval missed, yielding a +19.0% relative improvement in Hit@1 (31.5% to 37.5%) and driving MRR@3 from 0.383 to 0.428.
+
+#### 2. Input Guardrail Classification (N = 100 Cases)
+
+| Metric | Measured Value | Target Benchmark |
+| --- | --- | --- |
+| Precision | 1.000 | Zero out-of-domain leakage |
+| Recall | 0.980 | Valid dispute retention |
+| F1-Score | 0.990 | Harmonic balance |
+| Adversarial Rejection Rate | 100% (25/25) | Immune to jailbreaks/injections |
+| Accuracy | 99% (99/100) | Overall classification accuracy |
+| Mean Latency | 512.03ms | Sub-second gateway gating |
+| P95 Latency | 819.73ms | Bounded gateway tail latency |
+
+The fail-closed gateway rejected 25 of 25 out-of-domain inputs and 25 of 25 adversarial prompt injections, preventing downstream token consumption on Groq reasoning models.
+
+#### 3. Factual Grounding Auditor (N = 50 Audits)
+
+| Metric | Score | Evaluation Target |
+| --- | --- | --- |
+| Mean Grounded Score | 0.853 | Faithful citation of authority |
+| Mean Hallucinated Score | 0.073 | Penalization of fabricated statutes |
+| Discrimination Gap | 0.780 | Mathematical separation delta |
+| Hallucination Rejection Rate | 100% (15/15) | Scored <= 0.10 on fake laws |
+| Mean Latency | 852.26ms | Single-pass SLM audit |
+| P95 Latency | 1329.46ms | Verification latency ceiling |
+
+The auditor established a 0.780 score separation between grounded doctrine and fabricated statutes. All 15 synthetic hallucinations scored 0.10 or lower, eliminating the silent masking defect where unverified responses previously defaulted to 0.85.
+
+### Where the model succeeds and where it doesn't
+Retrieval precision splits across query structure. On statutory terms with distinctive legal terminology (e.g., dishonestly issuing a cheque, narcotics commercial quantity, temporary injunction stay order), the pipeline achieved 90% to 100% Hit@3. Conversely, on descriptive, narrative grievances (e.g., specific performance of oral property contracts, commercial dispute damages quantification), dense retrieval dropped to 0% to 20% Hit@3. The BAAI/bge cross-encoder rescued edge cases where dense similarity ranked statutory sections between ranks 4 and 8, but it cannot rescue instances where dense search fails to surface the document within the initial top-8 candidate window.
+
+The guardrail produced one false negative out of 100 test cases: Case 26 ("Recovery of damages under Fatal Accidents Act 1855 for hospital surgical negligence") was classified as invalid (is_valid: false). Because the prompt enforces strict boundaries against non-legal and administrative queries, ambiguous tort-based claims lacking explicit criminal or tenancy terminology risk rejection.
+
+The auditor demonstrated consistent discrimination against synthetic statutes: 15 out of 15 fabricated legal citations scored between 0.00 and 0.10. Grounded opinions averaged 0.853, with minor score penalties (0.40 to 0.60) applied to procedural extrapolations (e.g., requiring bank ledger subpoenas or postal tracking receipts not explicitly stated in statutory excerpts).  
+
+## Reliability guardrails
+
+Specific failure modes identified during benchmarking are handled structurally:
+
+- **Conversational JSON leaks:** `gpt-oss-20b` occasionally prefixes JSON with conversational text. The parser uses strict regex extraction (`\{.*\}`) and enforces fail-closed execution (`is_valid = False`) if decoding fails.
+- **Event loop blocking during reranking:** Running cross-encoder forward passes on CPU blocks the FastAPI event loop. Matrix calculations are thread-offloaded via `asyncio.to_thread` to maintain HTTP liveness probe responsiveness.
+- **Silent verification failure:** Hardcoded fallback grounding scores have been eliminated. Unparseable or empty auditor responses fail closed to a 0.0 grounding score.
+
+---
+
 ## Directory Structure
 
 ```text
@@ -73,15 +144,18 @@ InsafDostBackend/
 │   │   └── graph.py           # LangGraph StateGraph, node logic, and routing
 │   ├── __init__.py
 │   └── main.py                # FastAPI app, lifespan handler, CORS, and endpoints
+├── benchmarks/
+│   ├── benchmark.py           # Unified execution harness (retrieval, guardrail, auditor)
+│   ├── dataset.py             # 350-case empirical testbed (200 retrieval, 100 guardrail, 50 audit)
+│   └── results.json           # Telemetry, latencies, MRR/Hit@k, and F1 logs
 ├── .dockerignore
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
-├── CODE_OF_CONDUCT.md
 ├── Dockerfile                 # Container definition targeting Python 3.11-slim
 ├── LICENSE.md
 ├── ping_qdrant.py             # Qdrant cluster connectivity utility
-├── README.md
+├── README.md                  # System architecture, benchmarks, and API documentation
 └── requirements.txt           # Pinned Python dependencies
 
 ```
