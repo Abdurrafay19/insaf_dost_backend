@@ -37,9 +37,9 @@ async def execute_unified_benchmark():
     print("=" * 70)
 
     # -----------------------------------------------------------------
-    # PHASE 1: RETRIEVAL ABLATION (N = 60, Local CPU + Qdrant, 0 Tokens)
+    # PHASE 1: RETRIEVAL ABLATION (N = 200, Local CPU + Qdrant, 0 Tokens)
     # -----------------------------------------------------------------
-    print("\n[PHASE 1/3] Executing Realistic Retrieval Benchmark (N=60, 0 Groq Tokens)...")
+    print("\n[PHASE 1/3] Executing Realistic Retrieval Benchmark (N=200, 0 Groq Tokens)...")
     vectorstore = get_async_vectorstore(settings.qdrant_url, settings.qdrant_api_key)
     reranker = CrossEncoder("BAAI/bge-reranker-base", max_length=512, device="cpu")
 
@@ -97,7 +97,7 @@ async def execute_unified_benchmark():
         })
 
         if (idx + 1) % 15 == 0:
-            print(f"  -> Processed {idx+1:02d}/60 queries | Current Reranked Hit@3: {np.mean(rerank_h3)*100:.1f}%")
+            print(f"  -> Processed {idx+1:02d}/200 queries | Current Reranked Hit@3: {np.mean(rerank_h3)*100:.1f}%")
 
     retrieval_summary = {
         "sample_size": len(REALISTIC_RETRIEVAL_TESTBED),
@@ -120,9 +120,9 @@ async def execute_unified_benchmark():
     print(f"Phase 1 Finished. Hit@3 Delta: {retrieval_summary['metrics']['hit3_absolute_delta']*100:+.1f}% | MRR@3 Delta: {retrieval_summary['metrics']['mrr3_absolute_delta']:+.3f}")
 
     # -----------------------------------------------------------------
-    # PHASE 2: GUARDRAIL EVALUATION (N = 30, gpt-oss-20b, Paced 2.0s)
+    # PHASE 2: GUARDRAIL EVALUATION (N = 100, gpt-oss-20b, Paced 2.0s)
     # -----------------------------------------------------------------
-    print("\n[PHASE 2/3] Executing Guardrail Benchmark (N=30, gpt-oss-20b, Paced 2.0s)...")
+    print("\n[PHASE 2/3] Executing Guardrail Benchmark (N=100, gpt-oss-20b, Paced 2.0s)...")
     fast_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0.0, api_key=settings.groq_api_key, max_retries=2)
     nodes = AsyncGraphNodes(reasoner=None, fast_llm=fast_llm, vectorstore=None, reranker=None)
 
@@ -149,7 +149,7 @@ async def execute_unified_benchmark():
             "latency_ms": round(elapsed_ms, 2),
             "passed": predicted == item["expected"]
         })
-        print(f"  -> Case [{idx+1:02d}/30] | Expected: {str(item['expected']):<5} | Predicted: {str(predicted):<5} | {'OK' if predicted == item['expected'] else 'FAIL'}")
+        print(f"  -> Case [{idx+1:02d}/100] | Expected: {str(item['expected']):<5} | Predicted: {str(predicted):<5} | {'OK' if predicted == item['expected'] else 'FAIL'}")
         
         if idx < len(GUARDRAIL_TESTBED) - 1:
             await asyncio.sleep(2.0)  # Pacing to protect 30 RPM cap
@@ -174,9 +174,9 @@ async def execute_unified_benchmark():
     print(f"Phase 2 Finished. Precision: {p:.3f} | Recall: {r:.3f} | F1: {f1:.3f}")
 
     # -----------------------------------------------------------------
-    # PHASE 3: AUDITOR GROUNDING BENCHMARK (N = 15, gpt-oss-20b, Paced 12.5s)
+    # PHASE 3: AUDITOR GROUNDING BENCHMARK (N = 50, gpt-oss-20b, Paced 12.5s)
     # -----------------------------------------------------------------
-    print("\n[PHASE 3/3] Executing Auditor Benchmark (N=15, gpt-oss-20b, Paced 12.5s)...")
+    print("\n[PHASE 3/3] Executing Auditor Benchmark (N=50, gpt-oss-20b, Paced 12.5s)...")
     auditor_latencies_ms = []
     auditor_records = []
     grounded_scores, hallucinated_scores = [], []
@@ -201,7 +201,7 @@ async def execute_unified_benchmark():
             "score": score,
             "latency_ms": round(elapsed_ms, 2)
         })
-        print(f"  -> Audit [{idx+1:02d}/15] {item['name']:<40} | Score: {score:.2f} | Latency: {elapsed_ms:.0f}ms")
+        print(f"  -> Audit [{idx+1:02d}/50] {item['name']:<40} | Score: {score:.2f} | Latency: {elapsed_ms:.0f}ms")
 
         if idx < len(AUDITOR_TESTBED) - 1:
             print("     Sleeping 12.5s to enforce safe Groq Free Tier TPM boundaries...")
@@ -252,7 +252,7 @@ async def execute_unified_benchmark():
 
     print("\n" + "=" * 70)
     print(f"[COMPLETE] Benchmark run finished in {wall_duration:.1f}s.")
-    print(f"[OUTPUT] Master results logged to: {out_file}")
+    print(f"[OUTPUT] Results logged to: {out_file}")
     print("=" * 70)
 
 if __name__ == "__main__":
