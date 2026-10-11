@@ -26,8 +26,9 @@ class AsyncGraphNodes:
         self.reranker = reranker
 
     async def guardrail_node(self, state: InsafState):
-        text_preview = state["raw_text"][:60].replace("\n", " ")
-        print(f"\n[TRACE] >>> guardrail_node started: '{text_preview}...'")
+        print(
+            f"\n[TRACE] >>> guardrail_node started: {len(state['raw_text'])} characters"
+        )
 
         system_instruction = (
             "You are a strict binary classification gateway for a Pakistani legal assistance platform.\n"
@@ -57,7 +58,7 @@ class AsyncGraphNodes:
         try:
             response = await self.fast_llm.ainvoke(messages)
             raw_content = str(getattr(response, "content", response)).strip()
-            print(f"[TRACE] guardrail raw response: {raw_content}")
+            print(f"[TRACE] guardrail response received: {len(raw_content)} characters")
 
             # Strip markdown code blocks if present
             cleaned = re.sub(r"^```(?:json)?\s*", "", raw_content, flags=re.IGNORECASE)
@@ -83,7 +84,9 @@ class AsyncGraphNodes:
                 )
                 is_valid = False
         except Exception as e:
-            print(f"[TRACE] guardrail_node exception: {e}. Defaulting to False.")
+            print(
+                f"[TRACE] guardrail_node exception: {type(e).__name__}. Defaulting to False."
+            )
             is_valid = False
 
         print(f"[TRACE] guardrail verdict: is_valid={is_valid}")
@@ -123,7 +126,7 @@ class AsyncGraphNodes:
         try:
             response = await self.fast_llm.ainvoke(messages)
             raw_content = str(getattr(response, "content", response)).strip()
-            print(f"[TRACE] processor raw response: {raw_content}")
+            print(f"[TRACE] processor response received: {len(raw_content)} characters")
 
             cleaned = re.sub(r"^```(?:json)?\s*", "", raw_content, flags=re.IGNORECASE)
             cleaned = re.sub(r"\s*```$", "", cleaned).strip()
@@ -136,20 +139,20 @@ class AsyncGraphNodes:
                     category = parsed_cat
                 keywords = payload.get("keywords", keywords)
         except Exception as e:
-            print(f"[TRACE] processor_node exception: {e}")
+            print(f"[TRACE] processor_node exception: {type(e).__name__}")
 
-        print(f"[TRACE] processor parsed: category={category}, keywords={keywords}")
+        print(f"[TRACE] processor parsed: category={category}")
         return {"category": category, "legal_keywords": keywords}
 
     async def retriever_node(self, state: InsafState):
         query = state["legal_keywords"]
-        print(f"[TRACE] >>> retriever_node querying Qdrant with: '{query}'")
+        print("[TRACE] >>> retriever_node querying Qdrant")
 
         try:
             raw_docs = await self.vectorstore.asimilarity_search_with_score(query, k=8)
             print(f"[TRACE] Qdrant returned {len(raw_docs)} documents")
         except Exception as e:
-            print(f"[TRACE] Qdrant query error: {e}")
+            print(f"[TRACE] Qdrant query error: {type(e).__name__}")
             raw_docs = []
 
         if not raw_docs:
@@ -194,7 +197,7 @@ class AsyncGraphNodes:
                 final_scores = [score for _, score in ranked]
             except Exception as e:
                 print(
-                    f"[TRACE] Reranker exception: {e}. Falling back to top 3 vector hits."
+                    f"[TRACE] Reranker exception: {type(e).__name__}. Falling back to top 3 vector hits."
                 )
                 final_docs = [doc for (doc, _) in raw_docs[:3]]
                 final_scores = [score for (_, score) in raw_docs[:3]]
@@ -321,7 +324,7 @@ class AsyncGraphNodes:
                 response = await self.fast_llm.ainvoke(messages)
                 raw_content = str(getattr(response, "content", response)).strip()
                 print(
-                    f"[TRACE] auditor raw response (attempt {attempt + 1}): {raw_content}"
+                    f"[TRACE] auditor response received (attempt {attempt + 1}): {len(raw_content)} characters"
                 )
 
                 cleaned = re.sub(
@@ -346,7 +349,9 @@ class AsyncGraphNodes:
                     break
 
             except Exception as e:
-                print(f"[TRACE] auditor_node attempt {attempt + 1} exception: {e}")
+                print(
+                    f"[TRACE] auditor_node attempt {attempt + 1} exception: {type(e).__name__}"
+                )
                 await asyncio.sleep(1.5)
 
         print(f"[TRACE] auditor verified score: {score}")

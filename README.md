@@ -88,10 +88,10 @@ Cross-encoder reranking surfaced relevant authorities to Rank 1 on 12 queries th
 
 | Metric | Measured Value | Target Benchmark |
 | --- | --- | --- |
-| Precision | 1.000 | Zero out-of-domain leakage |
+| Precision | 1.000 | No out-of-domain input accepted in the test set |
 | Recall | 0.980 | Valid dispute retention |
 | F1-Score | 0.990 | Harmonic balance |
-| Adversarial Rejection Rate | 100% (25/25) | Immune to jailbreaks/injections |
+| Adversarial Rejection Rate | 100% (25/25) | Reject every injection in the test set (not proof of immunity) |
 | Accuracy | 99% (99/100) | Overall classification accuracy |
 | Mean Latency | 512.03ms | Sub-second gateway gating |
 | P95 Latency | 819.73ms | Bounded gateway tail latency |
