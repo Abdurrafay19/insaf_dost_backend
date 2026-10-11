@@ -3,12 +3,12 @@ import json
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import List, Dict, Any
+from typing import Annotated, List, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
 from langchain_groq import ChatGroq
 from app.core.config import get_settings
@@ -26,8 +26,13 @@ NODE_LABELS = {
 }
 
 
+CaseText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=15000)
+]
+
+
 class CaseRequest(BaseModel):
-    cases: List[str]
+    cases: List[CaseText] = Field(min_length=1, max_length=5)
 
 
 class CaseResponse(BaseModel):
@@ -93,16 +98,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="InsafDost AI API", lifespan=lifespan)
 
+_cors_settings = get_settings()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://insafdostai.vercel.app",
-        "http://localhost:3000",
-        "http://localhost:5173",
+        origin.strip()
+        for origin in _cors_settings.allowed_origins.split(",")
+        if origin.strip()
     ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -154,7 +161,7 @@ async def analyze_cases(request: CaseRequest, graph=Depends(get_graph)):
             except Exception as e:
                 err_str = str(e)
                 print(
-                    f"[REQUEST] Error during case [{i+1}] attempt {attempt + 1}: {err_str}"
+                    f"[REQUEST] Error during case [{i+1}] attempt {attempt + 1}: {type(e).__name__}"
                 )
                 if "429" in err_str or "rate_limit_exceeded" in err_str:
                     if attempt < max_retries - 1:
@@ -236,7 +243,16 @@ async def analyze_cases_stream(request: CaseRequest, graph=Depends(get_graph)):
                         await asyncio.sleep(backoff)
                         backoff *= 1.5
                         continue
-                    yield f"data: {json.dumps({'type': 'error', 'case_num': case_num, 'detail': err_str})}\n\n"
+                    logging.getLogger(__name__).error(
+                        "Case %s failed: %s", case_num, type(e).__name__
+                    )
+                    if "429" in err_str or "rate_limit_exceeded" in err_str:
+                        error_detail = (
+                            "The AI service is busy. Wait a minute and try again."
+                        )
+                    else:
+                        error_detail = "This matter could not be analyzed."
+                    yield f"data: {json.dumps({'type': 'error', 'case_num': case_num, 'detail': error_detail})}\n\n"
                     break
 
             if i < total_cases - 1 and case_succeeded:

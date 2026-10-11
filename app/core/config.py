@@ -6,6 +6,13 @@ class Settings(BaseSettings):
     qdrant_url: str = ""
     qdrant_api_key: str = ""
     environment: str = "production"
+    # Comma-separated list of browser origins allowed to call this API.
+    allowed_origins: str = (
+        "https://insafdostai.abdurrafaylabs.tech,"
+        "https://insafdostai.vercel.app,"
+        "http://localhost:3000,"
+        "http://localhost:5173"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env", 
