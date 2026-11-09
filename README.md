@@ -10,7 +10,7 @@ pinned: false
 
 # InsafDost AI Backend
 
-> **Live Demo:** [insafdostai.vercel.app](https://insafdostai.vercel.app)
+> **Live Demo:** [insafdostai.abdurrafaylabs.tech](https://insafdostai.abdurrafaylabs.tech)
 
 Asynchronous REST API and state-graph execution engine for automated Pakistani legal reasoning, precedent retrieval from Qdrant, and factual consistency auditing.
 
